@@ -32,7 +32,7 @@ def main(args):
     device = torch.device('cuda:'+str(args.device_num))
 
     # pretrained model 불러오기 (not meta learning) -> fine-tuning
-    model = models.resnet18(weights='IMAGENET1K_V1')
+    model = models.resnet50(weights='IMAGENET1K_V1')
     num_ftrs = model.fc.in_features
     model.fc = torch.nn.Linear(num_ftrs, args.n_way)
 
@@ -72,47 +72,45 @@ def main(args):
                 outputs = torch.argmax(pred, dim=1)
                 test_correct_count += (outputs == y).sum().item()
             print("epoch: ", epoch, "\ttraining acc: ", round(correct_count/2400*100, 2), "\ttest acc: ", round(test_correct_count/600*100, 2))
-        torch.save(model, './pretrained/resnet18.pt')
+        torch.save(model, './pretrained/resnet50_'+str(args.imgsz)+'.pt')
     else:
         model = torch.load(args.pretrained).to(device)
         model.eval()
-
+        #eval_model(model, device) # model 자체의 성능 평가 (이미지 크기 별)
         #attacks_success_rate(model, device) # attack 종류에 따른 성공률 측정 및 그래프 그리기
-        attacks_success_rate_eps(model, device) # attack 종류에 따른 성공률 그래프 (eps 변화)
+        #attacks_success_rate_eps(model, device) # attack 종류에 따른 성공률 그래프 (eps 변화)
         #attacks_success_rate_size(model, device) # attack 종류에 따른 성공률 그래프 (size)
         #save_attacked_pic(model, device) # attack을 받은 이미지에 저장
+        attacks_energy(model, device) # eps 변화에 따른 이미지 변형도 (MSE)
         
 
     # 그래프 (시간, 성공률) - 점
     # 그래프 (이미지 크기, 성공률) - 그래프 
 
-def attacks_success_rate(model, device):
-    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz)
-    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "EAD", "DDN", 
-                     "LBFGS", "Single_pixel", "Local_search", "ST"]
-    # attack 종류에 따른 성공률
-    for attack_name in attack_list:
-        writer = SummaryWriter("./success/"+attack_name, comment=attack_name)
-        at = setAttack(attack_name, model, args)
-        test_correct_count=0
+def eval_model(model, device):
+    writer = SummaryWriter("./model/"+"noname.pt", comment=args.pretrained) #TODO : 이름 바꾸기
+    for imgsz in tqdm([28, 42, 56, 70, 84, 98, 112, 126, 140, 154, 168, 182, 196, 210, 224], desc="imgsz"):
+        test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=imgsz)
         db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
-        st_time = time.time()
+
+        # make boolean list (model correctly inference)
+        test_correct_tensor = None
         for _, (x, y) in enumerate(db_test):
             x = x.to(device)
             y = y.to(device)
-            
-            advX = at.perturb(x, y)
-            
-            pred = torch.nn.functional.softmax(model(advX), dim=1)
-            outputs = torch.argmax(pred, dim=1)
-            test_correct_count += (outputs == y).sum().item()
-        end_time = time.time()
-        print(attack_name, (600-test_correct_count)/600, end_time-st_time)
-        writer.add_scalar("time_acc", (600-test_correct_count)/600, end_time-st_time)
+            with torch.no_grad():
+                p = torch.nn.functional.softmax(model(x), dim=1)
+                o = torch.argmax(p, dim=1)
+                correct_tensor = torch.where(y == o, torch.tensor(1).to(device), torch.tensor(0).to(device))
+                if test_correct_tensor==None:
+                    test_correct_tensor = correct_tensor
+                else:
+                    test_correct_tensor = torch.cat([test_correct_tensor, correct_tensor])
+        test_correct_count = test_correct_tensor.sum().item()
+        writer.add_scalar("eval_model", test_correct_count/600, imgsz)
 
 def attacks_success_rate_eps(model, device): # imgsz=70
-    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "EAD", "DDN", 
-                     "LBFGS", "Single_pixel", "Local_search", "ST"]
+    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "EAD", "DDN", "LBFGS", "Single_pixel", "Local_search", "ST"]
     test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=56)
     db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
 
@@ -132,8 +130,8 @@ def attacks_success_rate_eps(model, device): # imgsz=70
     test_correct_count = test_correct_tensor.sum().item()
     for attack_name in attack_list:
         writer = SummaryWriter("./success_eps/"+attack_name, comment=attack_name)
-        for e in range(1, 1001):
-            print(attack_name, e/1000)
+        for e in tqdm(range(1, 1001)):
+            #print(attack_name, e/1000)
             at = setAttack(attack_name, model, args, e/1000)
             test_attack_count=0
 
@@ -148,7 +146,7 @@ def attacks_success_rate_eps(model, device): # imgsz=70
 
                 test_attack_count += ((test_correct_tensor[step*args.task_num:(step+1)*args.task_num]) * (outputs != y)).sum().item()
             
-            print(test_attack_count/test_correct_count)
+            #print(test_attack_count/test_correct_count)
             writer.add_scalar("eps_acc", test_attack_count/test_correct_count, e)
             #writer.("log_eps_acc", test_attack_count)
             #writer.add_scalar("eps_time", end_time-st_time, e)
@@ -198,27 +196,83 @@ def attacks_success_rate_size(model, device):
             writer.add_scalar("sz_acc", test_attack_count/test_correct_count, imgsz)
             writer.add_scalar("sz_time", end_time-st_time, imgsz)
 
-
 def save_attacked_pic(model, device):
     test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz)
     attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "EAD", "DDN", 
                      "LBFGS", "Single_pixel", "Local_search", "ST"]
     transform = transforms.ToPILImage()
     db_test = DataLoader(test_data, 1, shuffle=True, num_workers=0, pin_memory=True) # 하나만 가져오기
-    for _, (x, y) in enumerate(db_test):
+
+    # make boolean list (model correctly inference)
+    test_correct_tensor = None
+    saved = []
+    for step, (x, y) in enumerate(db_test):
+        saved.append([step, (x, y)])
         x = x.to(device)
         y = y.to(device)
-        img = transform((x.squeeze()*(-255)+255).cpu())
-        img.save("./attacked_images/original.jpg")
-        for attack_name in attack_list:
-            at = setAttack(attack_name, model, args)
-            advX = at.perturb(x, y)
-            #print(torch.max(advX))
-            #print(torch.min(advX))
-            img = transform((advX.squeeze()*(-255)+255).cpu())
-            img.save("./attacked_images/"+attack_name+".jpg")
-            print(attack_name)
-        return
+        with torch.no_grad():
+            p = torch.nn.functional.softmax(model(x), dim=1)
+            o = torch.argmax(p, dim=1)
+            correct_tensor = torch.where(y == o, torch.tensor(1).to(device), torch.tensor(0).to(device))
+            if test_correct_tensor==None:
+                test_correct_tensor = correct_tensor
+            else:
+                test_correct_tensor = torch.cat([test_correct_tensor, correct_tensor])
+            if y.item()==o.item():
+                img = transform((x.squeeze()*(-255)+255).cpu())
+                img.save("./attacked_images/original/"+str(step)+".jpg")
+        test_correct_count = test_correct_tensor.sum().item()
+        if test_correct_count>9:
+            break
+    print(test_correct_tensor)
+    
+
+    for attack_name in attack_list:
+        for e in tqdm(range(1, 11), desc=attack_name):
+            eps = e/1000
+            at = setAttack(attack_name, model, args, eps)
+            for step, (x, y) in saved:
+                if step<len(test_correct_tensor):
+                    if test_correct_tensor[step]:
+                        x = x.to(device)
+                        y = y.to(device)
+                        advX = at.perturb(x, y)
+                        
+                        pred = torch.nn.functional.softmax(model(advX), dim=1)
+                        outputs = torch.argmax(pred, dim=1)
+                        res = ""
+                        if outputs==y:
+                            res = "fail"
+                        else:
+                            res = "succ"
+
+                        img = transform((advX.squeeze()*(-255)+255).cpu())
+                        img.save("./attacked_images/"+attack_name+"/"+str(step)+"_"+str(eps)+"_"+res+".jpg")
+                else:
+                    break
+
+def attacks_energy(model, device):
+    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "EAD", "DDN", 
+                     "LBFGS", "Single_pixel", "Local_search", "ST"]
+    
+    imgsz = 70
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=imgsz)
+    db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
+
+    for attack_name in attack_list:
+        writer = SummaryWriter("./attack_energy/"+attack_name, comment=attack_name)
+        for e in tqdm(range(1, 101), desc=attack_name):
+            at = setAttack(attack_name, model, args, e/100)
+            diff = 0
+            for _, (x, y) in enumerate(db_test):
+                x = x.to(device)
+                y = y.to(device)
+                
+                advX = at.perturb(x, y)
+                diff += np.square(np.subtract(x.cpu(), advX.cpu())).mean()
+
+            writer.add_scalar("eps_diff", diff, e)
+            
 
 def setAttack(str_at, net, args, e):
     if str_at == "PGD_L1":
