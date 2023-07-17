@@ -81,8 +81,8 @@ def main(args):
         #attacks_success_rate_eps(model, device) # attack 종류에 따른 성공률 그래프 (eps 변화)
         #attacks_success_rate_size(model, device) # attack 종류에 따른 성공률 그래프 (size)
         #save_attacked_pic(model, device) # attack을 받은 이미지에 저장
-        attacks_energy(model, device) # eps 변화에 따른 이미지 변형도 (MSE)
-        
+        #attacks_energy(model, device) # eps 변화에 따른 이미지 변형도 (MSE)
+        attacks_energy_logit(model, device) # imgsz 변화에 따른 logit 변형도 (MSE) -> 동일한 eps
 
     # 그래프 (시간, 성공률) - 점
     # 그래프 (이미지 크기, 성공률) - 그래프 
@@ -220,17 +220,17 @@ def save_attacked_pic(model, device):
                 test_correct_tensor = torch.cat([test_correct_tensor, correct_tensor])
             if y.item()==o.item():
                 img = transform((x.squeeze()*(-255)+255).cpu())
-                img.save("./attacked_images/original/"+str(step)+".jpg")
+                img.save("./attack_step_img/"+str(step)+".jpg")
         test_correct_count = test_correct_tensor.sum().item()
-        if test_correct_count>9:
+        if test_correct_count>0:
             break
     print(test_correct_tensor)
     
 
     for attack_name in attack_list:
-        for e in tqdm(range(1, 11), desc=attack_name):
-            eps = e/1000
-            at = setAttack(attack_name, model, args, eps)
+        #for e in tqdm(range(1, 11), desc=attack_name):
+            #eps = e/1000
+            at = setAttack(attack_name, model, args, 0.3/255.)
             for step, (x, y) in saved:
                 if step<len(test_correct_tensor):
                     if test_correct_tensor[step]:
@@ -238,30 +238,30 @@ def save_attacked_pic(model, device):
                         y = y.to(device)
                         advX = at.perturb(x, y)
                         
-                        pred = torch.nn.functional.softmax(model(advX), dim=1)
-                        outputs = torch.argmax(pred, dim=1)
-                        res = ""
-                        if outputs==y:
-                            res = "fail"
-                        else:
-                            res = "succ"
+                        #pred = torch.nn.functional.softmax(model(advX), dim=1)
+                        #outputs = torch.argmax(pred, dim=1)
+                        #res = ""
+                        #if outputs==y:
+                        #    res = "fail"
+                        #else:
+                        #    res = "succ"
 
-                        img = transform((advX.squeeze()*(-255)+255).cpu())
-                        img.save("./attacked_images/"+attack_name+"/"+str(step)+"_"+str(eps)+"_"+res+".jpg")
+                        #img = transform((advX.squeeze()*(-255)+255).cpu())
+                        #img.save("./attacked_images/"+attack_name+"/"+str(step)+"_"+str(eps)+"_"+res+".jpg")
                 else:
                     break
 
-def attacks_energy(model, device):
-    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "EAD", "DDN", 
+def attacks_energy_img(model, device):
+    # energy = 기존 이미지와의 MSE
+
+    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "DDN", "EAD",  
                      "LBFGS", "Single_pixel", "Local_search", "ST"]
-    
-    imgsz = 70
-    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=imgsz)
-    db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
 
     for attack_name in attack_list:
         writer = SummaryWriter("./attack_energy/"+attack_name, comment=attack_name)
-        for e in tqdm(range(1, 101), desc=attack_name):
+        test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=70)
+        db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
+        for e in tqdm(range(1, 101, 10), desc = attack_name):
             at = setAttack(attack_name, model, args, e/100)
             diff = 0
             for _, (x, y) in enumerate(db_test):
@@ -269,10 +269,38 @@ def attacks_energy(model, device):
                 y = y.to(device)
                 
                 advX = at.perturb(x, y)
-                diff += np.square(np.subtract(x.cpu(), advX.cpu())).mean()
+                diff += np.square(np.subtract(advX.detach().cpu().numpy(), x.detach().cpu().numpy())).sum()
 
-            writer.add_scalar("eps_diff", diff, e)
-            
+            writer.add_scalar("eps_diff_logit", diff/600, e)
+
+def attacks_energy_logit(model, device):
+    # energy = 기존 logit과의 MSE
+
+    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "DDN", "EAD",  
+                     "LBFGS", "Single_pixel", "Local_search", "ST"]
+
+    for attack_name in attack_list:
+        writer = SummaryWriter("./attack_energy_logit/"+attack_name+"_abs", comment=attack_name+"_abs")
+        print(attack_name)
+        at = setAttack(attack_name, model, args, 0.004)
+        for imgsz in range(28, 197, 14):
+            test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=imgsz)
+            db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
+            diff = 0
+            avg = 0
+            for _, (x, y) in enumerate(db_test):
+                x = x.to(device)
+                y = y.to(device)
+                
+                advX = at.perturb(x, y)
+                avg += torch.abs(model(x)).sum()
+                diff += np.square(np.subtract(model(x).detach().cpu().numpy(), model(advX).detach().cpu().numpy())).sum()
+
+            writer.add_scalar("imgsz_diff_logit", diff/600, imgsz)
+            if attack_name=="PGD_L1":
+                writer.add_scalar("imgsz_logit", avg/600, imgsz)
+
+
 
 def setAttack(str_at, net, args, e):
     if str_at == "PGD_L1":
