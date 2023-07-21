@@ -13,6 +13,8 @@ import time
 
 from torchvision import models, transforms
 
+import matplotlib.pyplot as plt
+
 
 import advertorch.attacks as attacks
 from aRUBattack import aRUB
@@ -32,7 +34,7 @@ def main(args):
     device = torch.device('cuda:'+str(args.device_num))
 
     # pretrained model 불러오기 (not meta learning) -> fine-tuning
-    model = models.resnet50(weights='IMAGENET1K_V1')
+    model = models.resnet18(weights='IMAGENET1K_V1')
     num_ftrs = model.fc.in_features
     model.fc = torch.nn.Linear(num_ftrs, args.n_way)
 
@@ -54,10 +56,11 @@ def main(args):
             for _, (x, y) in enumerate(db):
                 x = x.to(device)
                 y = y.to(device)
-                pred = torch.nn.functional.softmax(model(x), dim=1)
+                logit = model(x)
+                pred = torch.nn.functional.softmax(logit, dim=1)
                 outputs = torch.argmax(pred, dim=1)
                 correct_count += (outputs == y).sum().item()
-                loss = torch.nn.functional.cross_entropy(pred, y)
+                loss = torch.nn.functional.cross_entropy(logit, y)
                 optim.zero_grad()
                 loss.backward()
                 optim.step()
@@ -72,20 +75,52 @@ def main(args):
                 outputs = torch.argmax(pred, dim=1)
                 test_correct_count += (outputs == y).sum().item()
             print("epoch: ", epoch, "\ttraining acc: ", round(correct_count/2400*100, 2), "\ttest acc: ", round(test_correct_count/600*100, 2))
-        torch.save(model, './pretrained/resnet50_'+str(args.imgsz)+'.pt')
+        torch.save(model, './pretrained/resnet18_'+str(args.imgsz)+'.pt')
     else:
         model = torch.load(args.pretrained).to(device)
         model.eval()
         #eval_model(model, device) # model 자체의 성능 평가 (이미지 크기 별)
+        model_acc(model, device) # model의 SA와 RA 평가
         #attacks_success_rate(model, device) # attack 종류에 따른 성공률 측정 및 그래프 그리기
         #attacks_success_rate_eps(model, device) # attack 종류에 따른 성공률 그래프 (eps 변화)
         #attacks_success_rate_size(model, device) # attack 종류에 따른 성공률 그래프 (size)
         #save_attacked_pic(model, device) # attack을 받은 이미지에 저장
         #attacks_energy(model, device) # eps 변화에 따른 이미지 변형도 (MSE)
-        attacks_energy_logit(model, device) # imgsz 변화에 따른 logit 변형도 (MSE) -> 동일한 eps
+        #attacks_energy_logit(model, device) # imgsz 변화에 따른 logit 변형도 (MSE) -> 동일한 eps
 
     # 그래프 (시간, 성공률) - 점
     # 그래프 (이미지 크기, 성공률) - 그래프 
+
+def model_acc(model, device):
+
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz)
+    db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
+    
+    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "DDN", "EAD",  
+                     "LBFGS", "Single_pixel", "Local_search", "ST"]
+
+    model_name="resnet18"
+
+    for attack_name in attack_list:
+        writer = SummaryWriter("./acc/"+model_name+"/"+attack_name, comment=args.pretrained) 
+        at = setAttack(attack_name, model, args, 0.004)
+        correct_num = 0
+        correct_adv_num = 0
+        for _, (x, y) in enumerate(db_test):
+            x = x.to(device)
+            y = y.to(device)
+            advX = at.perturb(x, y)
+            with torch.no_grad():
+                p = torch.nn.functional.softmax(model(x), dim=1)
+                o = torch.argmax(p, dim=1)
+                correct_num += torch.where(y == o, torch.tensor(1).to(device), torch.tensor(0).to(device)).sum()
+
+                p_adv = torch.nn.functional.softmax(model(advX), dim=1)
+                o_adv = torch.argmax(p_adv, dim=1)
+                correct_adv_num += torch.where(y == o_adv, torch.tensor(1).to(device), torch.tensor(0).to(device)).sum()
+            
+        writer.add_scalar("SA", correct_num/600)
+        writer.add_scalar("RA", correct_adv_num/600)
 
 def eval_model(model, device):
     writer = SummaryWriter("./model/"+"noname.pt", comment=args.pretrained) #TODO : 이름 바꾸기
@@ -300,6 +335,40 @@ def attacks_energy_logit(model, device):
             if attack_name=="PGD_L1":
                 writer.add_scalar("imgsz_logit", avg/600, imgsz)
 
+'''
+def t_SNE(model, device):
+    attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "DDN", "EAD",  
+                     "LBFGS", "Single_pixel", "Local_search", "ST"]
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz)
+    db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
+    tsne = TSNE(n_components=2, random_state=222)
+    
+    for attack_name in attack_list:
+        at = setAttack(attack_name, model, args, 0.004)
+
+        for _, (x, y) in enumerate(db_test):
+            x = x.to(device)
+            y = y.to(device)
+            
+            advX = at.perturb(x, y)
+
+    
+        #extract last features only
+        test_features = test_features.data[:,-1,:]
+        tsne = TSNE(n_components=2, perplexity=10, n_iter=300)
+        tsne_ref = tsne.fit_transform(test_features)
+        df = pd.DataFrame(tsne_ref, index=tsne_ref[0:,1])
+        df['x'] = tsne_ref[:,0]
+        df['y'] = tsne_ref[:,1]
+        df['Label'] = y[:]
+        #sns.scatterplot(x="x", y="y", hue="y", palette=sns.color_palette("hls", 10), data=df)
+        sns.lmplot(x="x", y="y", data=df, fit_reg=False, legend=True, size=9, hue='Label', scatter_kws={"s":200, "alpha":0.5})
+        plt.title('t-SNE result', weight='bold').set_fontsize('14')
+        plt.xlabel('x', weight='bold').set_fontsize('10')
+        plt.ylabel('y', weight='bold').set_fontsize('10')
+        plt.show()
+
+'''
 
 
 def setAttack(str_at, net, args, e):

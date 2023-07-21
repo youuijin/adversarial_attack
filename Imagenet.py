@@ -46,7 +46,7 @@ class Imagenet(Dataset):
         self.n_way = n_way  # n-way
         self.resize = resize  # resize to
         self.startidx = startidx  # index label not from 0, but from startidx
-        print('shuffle DB :%s, %d-way, resize:%d' % (mode, n_way, resize))
+        #print('shuffle DB :%s, %d-way, resize:%d' % (mode, n_way, resize))
 
         if mode == 'train':
             self.transform = transforms.Compose([lambda x: Image.open(x).convert('RGB'),
