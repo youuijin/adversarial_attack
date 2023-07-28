@@ -34,9 +34,13 @@ def main(args):
     eps = args.eps
     at = setAttack(args.attack, model, args, eps)
 
-    test_data = Imagenet('../../dataset', mode='image', n_way=args.n_way, resize=args.imgsz)
+    test_data = Imagenet('../../dataset', mode='image', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
     transform = transforms.ToPILImage()
     db_test = DataLoader(test_data, 1, shuffle=True, num_workers=0, pin_memory=True) # 하나만 가져오기
+    save_path = ".\\FRLossImages\\"+args.attack+"\\"+"eps"+str(args.eps)+"_r"+str(args.r)+"_alpha"+str(args.alpha)+"\\"
+    os.makedirs(save_path, exist_ok=True)
+
+    f = open(save_path+"log.txt", 'w')
     
     for step, (x, y) in enumerate(db_test):
         x = x.to(device)
@@ -45,36 +49,48 @@ def main(args):
         with torch.no_grad():
             p = torch.nn.functional.softmax(model(x), dim=1)
             o = torch.argmax(p, dim=1)
-            img = transform((x.squeeze()*(-255)+255).cpu())
-            img.save("./FRLossImages/original.jpg")
+            if args.imgc==3:
+                img = transform((x.squeeze()*(-255)+255).cpu())
+            else:
+                img = transform((x.squeeze()).cpu())
+            img.save(save_path+"original.jpg")
             print("original:", y.item()==o.item())
 
-        advX = at.perturb(x, y, advFR=True, r=args.r, max_num=args.max_num)
 
-        img = transform((advX.squeeze()*(-255)+255).cpu())
+        advX = at.perturb(x, y, advFR=True, r=args.r, alpha=args.alpha)
+        if args.imgc==3:
+                img = transform((advX.squeeze()*(-255)+255).cpu())
+        else:
+            img = transform((advX.squeeze()).cpu())
+
         if torch.argmax(torch.nn.functional.softmax(model(advX), dim=1), dim=1).item()==y.item():
             res = "fail"
         else:
             res = "succ"
-        img.save("./FRLossImages/"+args.attack+"_FRLoss_"+res+".jpg")
+        img.save(save_path+"FRLoss_"+res+".jpg")
         
         advX = at.perturb(x, y, advFR=False) 
-        img = transform((advX.squeeze()*(-255)+255).cpu())
+        if args.imgc==3:
+                img = transform((advX.squeeze()*(-255)+255).cpu())
+        else:
+            img = transform((advX.squeeze()).cpu())
+
         if torch.argmax(torch.nn.functional.softmax(model(advX), dim=1), dim=1).item()==y.item():
             res = "fail"
         else:
             res = "succ"
-        img.save("./FRLossImages/"+args.attack+"_noFRLoss_"+res+".jpg")
+        img.save(save_path+"noFRLoss_"+res+".jpg")
+    f.close()
 
     # 그래프 (시간, 성공률) - 점
     # 그래프 (이미지 크기, 성공률) - 그래프 
 
 def model_acc(model, device, advFR):
 
-    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz)
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
     db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
 
-    at = setAttack(args.test_attack, model, args, 0.03, advFR)
+    at = setAttack(args.test_attack, model, args, 0.03)
     correct_num = 0
     correct_adv_num = 0
     loss = 0
@@ -99,33 +115,6 @@ def model_acc(model, device, advFR):
     adv_acc = correct_adv_num/600
     return acc.item(), adv_acc.item(), (loss/600).item(), (loss_adv/600).item()
 
-def save_attacked_pic(model, device):
-    
-    
-
-    for attack_name in attack_list:
-        #for e in tqdm(range(1, 11), desc=attack_name):
-            #eps = e/1000
-            at = setAttack(attack_name, model, args, 0.3/255.)
-            for step, (x, y) in saved:
-                if step<len(test_correct_tensor):
-                    if test_correct_tensor[step]:
-                        x = x.to(device)
-                        y = y.to(device)
-                        advX = at.perturb(x, y)
-                        
-                        #pred = torch.nn.functional.softmax(model(advX), dim=1)
-                        #outputs = torch.argmax(pred, dim=1)
-                        #res = ""
-                        #if outputs==y:
-                        #    res = "fail"
-                        #else:
-                        #    res = "succ"
-
-                        #img = transform((advX.squeeze()*(-255)+255).cpu())
-                        #img.save("./attacked_images/"+attack_name+"/"+str(step)+"_"+str(eps)+"_"+res+".jpg")
-                else:
-                    break
 
 def setAttack(str_at, net, args, e):
     # TODO FR LOSS 추가!!!
@@ -137,8 +126,6 @@ def setAttack(str_at, net, args, e):
         return attacks.LinfPGDAttack(net, eps=e, nb_iter=10)
     elif str_at == "FGSM":
         return attacks.GradientSignAttack(net, eps=e)
-    elif str_at == "FFA":
-        return attacks.FastFeatureAttack(net, eps=e, nb_iter=10)
     elif str_at == "BIM_L2":
         return attacks.L2BasicIterativeAttack(net, eps=e, nb_iter=10)
     elif str_at == "BIM_Linf":
@@ -150,17 +137,11 @@ def setAttack(str_at, net, args, e):
     elif str_at == "EAD":
         return attacks.ElasticNetL1Attack(net, args.n_way)
     elif str_at == "DDN":
-        return attacks.DDNL2Attack(net)
-    elif str_at == "LBFGS":
-        return attacks.LBFGSAttack(net, args.n_way)
+        return attacks.DDNL2Attack(net, nb_iter=10)
     elif str_at == "Single_pixel":
         return attacks.SinglePixelAttack(net)
-    elif str_at == "Local_search":
-        return attacks.LocalSearchAttack(net)
-    elif str_at == "ST":
-        return attacks.SpatialTransformAttack(net, args.n_way)
-    elif str_at == "JSMA":
-        return attacks.JacobianSaliencyMapAttack(net, args.n_way)
+    elif str_at == "DeepFool":
+        return attacks.DeepfoolLinfAttack(net, args.n_way, eps=e)
     else:
         print("wrong type Attack")
         exit()
@@ -196,7 +177,7 @@ if __name__ == '__main__':
     # adversarial FRLoss options
     argparser.add_argument('--pretrained', type=str, help="pretrained model path", default="")
     argparser.add_argument('--r', type=float, help="regularizer in frequency domain", default=2)
-    argparser.add_argument('--max_num', type=float, help="max num in frequency domain", default=1.0)
+    argparser.add_argument('--alpha', type=float, help="weight between CE Loss and FR Loss", default=0.3)
 
     args = argparser.parse_args()
 

@@ -28,7 +28,7 @@ def main(args):
     device = torch.device('cuda:'+str(args.device_num))
 
     # pretrained model
-    model = models.resnet18(weights='IMAGENET1K_V1')
+    model = models.resnet50(weights='IMAGENET1K_V1')
     num_ftrs = model.fc.in_features
     model.fc = torch.nn.Linear(num_ftrs, args.n_way)
     #model = torch.load(args.pretrained).to(device)
@@ -48,8 +48,8 @@ def main(args):
         advCE = (args.mode[0]=='1')
         advFR = (args.mode[1]=='1')
 
-        writer = SummaryWriter("./runs/resnet18/"+args.mode+"/"+time.strftime('%m-%d-%H%M%S'), comment=args.mode) 
-        train_data = Imagenet('../../dataset', mode='train', n_way=args.n_way, resize=args.imgsz)
+        writer = SummaryWriter("./runs/resnet50Gray/"+args.mode+"/"+time.strftime('%m-%d-%H%M%S'), comment=args.mode) 
+        train_data = Imagenet('../../dataset', mode='train', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
         optim = torch.optim.Adam(model.parameters(), lr=0.00001)
         tot_step=0
         for epoch in range(args.epoch):
@@ -95,7 +95,7 @@ def main(args):
             print("epoch: ", epoch, "\tSA:", acc, "\tRA:", acc_adv, "\tSL:", loss, "\tRL:", loss_adv)
     # only evaluation
     else:
-        #model = torch.load(args.pretrained).to(device)
+        model = torch.load(args.pretrained).to(device)
         model.eval()
         acc, acc_adv, loss, loss_adv = model_acc(model, device, "")
         print("SA:", acc, "\tRA:", acc_adv, "\tSL:", loss, "\tRL:", loss_adv)
@@ -106,10 +106,10 @@ def main(args):
 
 def model_acc(model, device, advFR):
 
-    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz)
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
     db_test = DataLoader(test_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True) # 600
 
-    at = setAttack(args.test_attack, model, args, 0.03, advFR)
+    at = setAttack(args.test_attack, model, args, 0.00003, advFR)
     correct_num = 0
     correct_adv_num = 0
     loss = 0
@@ -169,6 +169,8 @@ def setAttack(str_at, net, args, e, FR):
         return attacks.SpatialTransformAttack(net, args.n_way)
     elif str_at == "JSMA":
         return attacks.JacobianSaliencyMapAttack(net, args.n_way)
+    elif str_at == "DeepFool":
+        return attacks.DeepfoolLinfAttack(net, num_classes=args.n_way, eps=e)
     else:
         print("wrong type Attack")
         exit()

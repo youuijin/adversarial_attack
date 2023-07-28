@@ -34,9 +34,10 @@ def main(args):
     device = torch.device('cuda:'+str(args.device_num))
 
     # pretrained model 불러오기 (not meta learning) -> fine-tuning
-    model = models.resnet18(weights='IMAGENET1K_V1')
+    model = models.resnet50(weights='IMAGENET1K_V1')
     num_ftrs = model.fc.in_features
     model.fc = torch.nn.Linear(num_ftrs, args.n_way)
+    model.conv1 = torch.nn.Conv2d(args.imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
 
     model = model.to(device)
     model.train()
@@ -46,8 +47,8 @@ def main(args):
     # meta learning model에 대해서도 진행 -> 낮은 정확도를 가지는 모델일 경우 attack이 잘 안되는가?
     if args.pretrained=="":
         # 이미지 불러오기
-        train_data = Imagenet('../../dataset', mode='train', n_way=args.n_way, resize=args.imgsz)
-        test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz)
+        train_data = Imagenet('../../dataset', mode='train', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
+        test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
         optim = torch.optim.Adam(model.parameters(), lr=0.00005)
         for epoch in range(args.epoch):
             db = DataLoader(train_data, args.task_num, shuffle=True, num_workers=0, pin_memory=True, drop_last=True)
@@ -75,7 +76,7 @@ def main(args):
                 outputs = torch.argmax(pred, dim=1)
                 test_correct_count += (outputs == y).sum().item()
             print("epoch: ", epoch, "\ttraining acc: ", round(correct_count/2400*100, 2), "\ttest acc: ", round(test_correct_count/600*100, 2))
-        torch.save(model, './pretrained/resnet18_'+str(args.imgsz)+'.pt')
+        torch.save(model, './pretrained/resnet50_gray_'+str(args.imgsz)+'.pt')
     else:
         model = torch.load(args.pretrained).to(device)
         model.eval()
