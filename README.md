@@ -3,10 +3,11 @@
 https://github.com/BorealisAI/advertorch
 
 ### command
-1. for training
+1. Training
    - normal model
-     '''
-     python main.py
-     '''
+     ```
+     python main.py --model=<model type> --n_way=<number of classes>
+     ```
+   - robust model
   
 
