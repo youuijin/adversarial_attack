@@ -6,11 +6,10 @@ from    learner import Learner
 import time
 
 class aRUB:
-    def __init__(self, net, rho, q, n_way, k_qry, imgc, imgsz):
+    def __init__(self, net, rho, q, n_way, imgc, imgsz):
         self.rho = rho
         self.q = q
         self.n_way = n_way
-        self.k_qry = k_qry
         self.imgc = imgc
         self.imgsz = imgsz
         self.net = net

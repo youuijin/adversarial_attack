@@ -8,6 +8,7 @@ import time
 
 from torchvision import models, transforms
 import advertorch.attacks as attacks
+from aRUBattack import aRUB
 
 attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "DDN", "EAD", "Single_pixel", "DeepFool"]
 
@@ -192,7 +193,7 @@ def save_all_attacked_img(model, device, args):
 
 def save_attacked_img(model, device, args):
     # save attacked image
-    at = setAttack(args.attack, model, args)
+    at = setAttack(args.test_attack, model, args.test_eps, args)
 
     test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
     transform = transforms.ToPILImage()
@@ -201,7 +202,7 @@ def save_attacked_img(model, device, args):
         color="gray"
     else:
         color="RGB"
-    save_path = ".\\AttackedImages\\"+color+"\\"+args.attack+"\\"+"eps_"+str(args.eps)+"\\"
+    save_path = ".\\AttackedImages\\"+color+"\\"+args.test_attack+"\\"+"eps_"+str(args.test_eps)+"\\"
     os.makedirs(save_path, exist_ok=True)
     
     log_str = []
@@ -282,8 +283,8 @@ def attacks_energy_logit(model, device, args):
             #     writer.add_scalar("imgsz_logit", avg/600, imgsz)
         print(result)
 
-def setAttack(str_at, net, args):
-    e = args.eps/255.
+def setAttack(str_at, net, eps, args):
+    e = eps/255.
     iter = args.iter
     if str_at == "PGD_L1":
         return attacks.L1PGDAttack(net, eps=e, nb_iter=iter)
@@ -309,6 +310,65 @@ def setAttack(str_at, net, args):
         return attacks.SinglePixelAttack(net, max_pixels=iter)
     elif str_at == "DeepFool":
         return attacks.DeepfoolLinfAttack(net, args.n_way, eps=e, nb_iter=iter)
+    elif str_at == "aRUB":
+            return aRUB(net, rho=e, q=1, n_way=args.n_way, imgc=args.imgc, imgsz=args.imgsz)
     else:
         print("wrong type Attack")
+        exit()
+
+def setModel(str, n_way, imgsz, imgc):
+    str = str.lower()
+    if str=="resnet18":
+        model = models.resnet18(weights='IMAGENET1K_V1')
+        num_ftrs = model.fc.in_features
+        model.fc = torch.nn.Linear(num_ftrs, n_way)
+        model.conv1 = torch.nn.Conv2d(imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    elif str=="resnet34":
+        model = models.resnet34(weights='IMAGENET1K_V1')
+        num_ftrs = model.fc.in_features
+        model.fc = torch.nn.Linear(num_ftrs, n_way)
+        model.conv1 = torch.nn.Conv2d(imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    elif str=="resnet50":
+        model = models.resnet50(weights='IMAGENET1K_V1')
+        num_ftrs = model.fc.in_features
+        model.fc = torch.nn.Linear(num_ftrs, n_way)
+        model.conv1 = torch.nn.Conv2d(imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    elif str=="resnet101":
+        model = models.resnet101(weights='IMAGENET1K_V1')
+        num_ftrs = model.fc.in_features
+        model.fc = torch.nn.Linear(num_ftrs, n_way)
+        model.conv1 = torch.nn.Conv2d(imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    elif str=="resnet152":
+        model = models.resnet152(weights='IMAGENET1K_V1')
+        num_ftrs = model.fc.in_features
+        model.fc = torch.nn.Linear(num_ftrs, n_way)
+        model.conv1 = torch.nn.Conv2d(imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    elif str=="alexnet":
+        model = models.alexnet(weights='IMAGENET1K_V1')
+        num_ftrs = model.classifier._modules["6"].in_features
+        model.classifier._modules["6"] = torch.nn.Linear(num_ftrs, n_way)
+        model.features._modules["0"] = torch.nn.Conv2d(imgc, 64, kernel_size=11, stride=4, padding=2, bias=False)
+        return model
+    elif str=="densenet121":
+        model = models.densenet121(weights='IMAGENET1K_V1')
+        num_ftrs = model.classifier.in_features
+        model.classifier = torch.nn.Linear(num_ftrs, n_way)
+        model.features._modules["0"] = torch.nn.Conv2d(imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        return model
+    elif str=="mobilenet_v2":
+        model = models.mobilenet_v2(weights='IMAGENET1K_V1')
+        num_ftrs = model.classifier._modules["1"].in_features
+        model.classifier._modules["1"] = torch.nn.Linear(num_ftrs, n_way)
+        model.features._modules["0"]._modules["0"] = torch.nn.Conv2d(imgc, 32, kernel_size=3, stride=2, padding=1, bias=False)
+        return models.mobilenet_v2(weights='IMAGENET1K_V1')
+    elif str=="conv3":
+        pass
+    else:
+        print("wrong model")
+        print("possible models : resnet18, resnet34, resnet50, resnet101, resnet152, alexnet, densenet121, mobilenet_v2, conv3")
         exit()
