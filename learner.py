@@ -78,11 +78,6 @@ class Learner(nn.Module):
             else:
                 raise NotImplementedError
 
-
-
-
-
-
     def extra_repr(self):
         info = ''
 
@@ -117,8 +112,6 @@ class Learner(nn.Module):
                 raise NotImplementedError
 
         return info
-
-
 
     def forward(self, x, vars=None, bn_training=False):
         """
@@ -262,8 +255,65 @@ class Learner(nn.Module):
         assert idx == len(vars)
         assert bn_idx == len(self.vars_bn)
 
-
         return x
+    
+    def forward_layer(self, x, name, param, idx, bn_idx):
+        """
+        x = [3, imgsz, imgsz]
+        """
+        if name is 'conv2d':
+            w, b = vars[idx], vars[idx + 1]
+            # remember to keep synchrozied of forward_encoder and forward_decoder!
+            x = F.conv2d(x, w, b, stride=param[4], padding=param[5])
+            idx += 2
+            # print(name, param, '\tout:', x.shape)
+        elif name is 'convt2d':
+            w, b = vars[idx], vars[idx + 1]
+            # remember to keep synchrozied of forward_encoder and forward_decoder!
+            x = F.conv_transpose2d(x, w, b, stride=param[4], padding=param[5])
+            idx += 2
+            # print(name, param, '\tout:', x.shape)
+        elif name is 'linear': 
+            w, b = vars[idx], vars[idx + 1]
+            x = F.linear(x, w, b)
+            idx += 2
+            # print('forward:', idx, x.norm().item())
+        elif name is 'bn':
+            w, b = vars[idx], vars[idx + 1]
+            running_mean, running_var = self.vars_bn[bn_idx], self.vars_bn[bn_idx+1]
+            x = F.batch_norm(x, running_mean, running_var, weight=w, bias=b, training=False)
+            idx += 2
+            bn_idx += 2
+
+        elif name is 'flatten':
+            # print(x.shape)
+            x = x.view(x.size(0), -1)
+        elif name is 'reshape':
+            # [b, 8] => [b, 2, 2, 2]
+            x = x.view(x.size(0), *param)
+        elif name is 'relu':
+            x = F.relu(x, inplace=param[0])
+        elif name is 'leakyrelu':
+            x = F.leaky_relu(x, negative_slope=param[0], inplace=param[1])
+        elif name is 'tanh':
+            x = F.tanh(x)
+        elif name is 'sigmoid':
+            x = torch.sigmoid(x)
+        elif name is 'upsample':
+            x = F.upsample_nearest(x, scale_factor=param[0])
+        elif name is 'max_pool2d':
+            x = F.max_pool2d(x, param[0], param[1], param[2])
+        elif name is 'avg_pool2d':
+            x = F.avg_pool2d(x, param[0], param[1], param[2])
+
+        else:
+            raise NotImplementedError
+
+        # make sure variable is used properly
+        #assert idx == len(vars)
+        #assert bn_idx == len(self.vars_bn)
+
+        return x, idx, bn_idx
 
     def zero_grad(self, vars=None):
         """
@@ -287,3 +337,5 @@ class Learner(nn.Module):
         """
         return self.vars
 
+    def set_parameters(self, vars):
+        self.vars = vars
