@@ -21,39 +21,6 @@ def main(args):
 
     # pretrained model 불러오기 (not meta learning) -> fine-tuning
     if args.pretrained=="":
-        # if args.resnet==0:
-        #     # pretrained model
-        #     s = (args.imgsz-2)//2
-        #     s = (s-2)//2
-        #     s = s-3
-
-        #     config = [
-        #         ('conv2d', [32, 3, 3, 3, 1, 0]),
-        #         ('relu', [True]),
-        #         ('bn', [32]),
-        #         ('max_pool2d', [2, 2, 0]),
-        #         ('conv2d', [32, 32, 3, 3, 1, 0]),
-        #         ('relu', [True]),
-        #         ('bn', [32]),
-        #         ('max_pool2d', [2, 2, 0]),
-        #         ('conv2d', [32, 32, 3, 3, 1, 0]),
-        #         ('relu', [True]),
-        #         ('bn', [32]),
-        #         ('max_pool2d', [2, 1, 0]),
-        #         ('flatten', []),
-        #         ('linear', [args.n_way, 32 * s * s])
-        #     ]
-
-        #     model = Learner(config, args.imgc, args.imgsz)
-        #     model = model.to(device)
-
-        # else:
-        #     model = models.resnet18(weights='IMAGENET1K_V1')
-        #     num_ftrs = model.fc.in_features
-        #     model.fc = torch.nn.Linear(num_ftrs, args.n_way)
-        #     model.conv1 = torch.nn.Conv2d(args.imgc, 64, kernel_size=7, stride=2, padding=3, bias=False)
-
-        #     model = model.to(device)
 
         model = utils.setModel(args.model, args.n_way, args.imgsz, args.imgc)
         model = model.to(device)
@@ -135,50 +102,10 @@ def main(args):
             test_adv_correct_count += (outputs == y).sum().item()
         print("\ntest acc:", round(test_correct_count/(60*args.n_way)*100, 2), '\ttest adv acc:', round(test_adv_correct_count/(60*args.n_way)*100, 2))
 
-        # if args.resnet==0:
-        #     # torch.save(model.parameters(), f'./pretrained/conv3_{args.n_way}way_{args.imgsz}.pt')
-        #     torch.save(model.state_dict(), f'./pretrained/conv3_{args.n_way}way_{args.imgsz}.pt')
-        # else:
-        #     torch.save(model, f'./pretrained/resnet{args.resnet}_{args.n_way}way_{args.imgsz}.pt')
-
         torch.save(model, f'./pretrained/{args.model}_{args.n_way}way_{args.imgsz}_{args.train_attack}.pt')
-        #print(model)
     else:
-        # if args.resnet==0:
-
-        #     # pretrained model
-        #     s = (args.imgsz-2)//2
-        #     s = (s-2)//2
-        #     s = s-3
-        #     config = [
-        #         ('conv2d', [32, 3, 3, 3, 1, 0]),
-        #         ('relu', [True]),
-        #         ('bn', [32]),
-        #         ('max_pool2d', [2, 2, 0]),
-        #         ('conv2d', [32, 32, 3, 3, 1, 0]),
-        #         ('relu', [True]),
-        #         ('bn', [32]),
-        #         ('max_pool2d', [2, 2, 0]),
-        #         ('conv2d', [32, 32, 3, 3, 1, 0]),
-        #         ('relu', [True]),
-        #         ('bn', [32]),
-        #         ('max_pool2d', [2, 1, 0]),
-        #         ('flatten', []),
-        #         ('linear', [args.n_way, 32 * s * s])
-        #     ]
-        #     # vars = torch.load(args.pretrained).to(device)
-            
-        #     model = Learner(config, args.imgc, args.imgsz)
-        #     model = model.to(device)
-        #     model.load_state_dict(torch.load(args.pretrained))
-        #     # model.set_parameters(vars)
-        # else:
-        #     model = torch.load(args.pretrained).to(device)
-
         model = torch.load(args.pretrained).to(device)
-        # TODO : conv3 모델은 다르게?
         utils.save_attacked_img(model, device, args)
-        #utils.open_image(model, device, args)
 
 
 if __name__ == '__main__':
