@@ -1,21 +1,9 @@
-import  torch, os
+import  torch
 import  numpy as np
 from    Imagenet import Imagenet
 from    torch.utils.data import DataLoader
-from torch import optim
-import  random, sys, pickle
+import  random
 import  argparse
-from tqdm import tqdm
-
-import time
-
-from torchvision import models, transforms
-import matplotlib.pyplot as plt
-import advertorch.attacks as attacks
- 
-from torch.utils.tensorboard import SummaryWriter
-
-from learner import Learner
 
 import utils
 
@@ -190,6 +178,8 @@ def main(args):
         model = torch.load(args.pretrained).to(device)
         # TODO : conv3 모델은 다르게?
         utils.save_attacked_img(model, device, args)
+        #utils.open_image(model, device, args)
+
 
 if __name__ == '__main__':
 

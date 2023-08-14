@@ -10,6 +10,10 @@ from torchvision import models, transforms
 import advertorch.attacks as attacks
 from aRUBattack import aRUB
 
+import pickle
+
+from PIL import Image
+
 attack_list=["PGD_L1", "PGD_L2", "PGD_Linf", "FGSM", "BIM_L2", "BIM_Linf", "MI-FGSM", "CnW", "DDN", "EAD", "Single_pixel", "DeepFool"]
 
 def model_acc(model, device, args):
@@ -196,7 +200,7 @@ def save_attacked_img(model, device, args):
     at = setAttack(args.test_attack, model, args.test_eps, args)
 
     test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
-    transform = transforms.ToPILImage()
+    #transform = transforms.ToPILImage()
     db_test = DataLoader(test_data, 1, shuffle=False, num_workers=0, pin_memory=True) # 하나만 가져오기
     if args.imgc==1:
         color="gray"
@@ -205,13 +209,13 @@ def save_attacked_img(model, device, args):
     save_path = ".\\AttackedImages\\"+color+"\\"+args.test_attack+"\\"+"eps_"+str(args.test_eps)+"\\"
     os.makedirs(save_path, exist_ok=True)
     
-    log_str = []
+    #log_str = []
     cnt = 0
     
     for step, (x, y) in enumerate(db_test):
         print()
         print("Image", step)
-        log_str.append("\nImage "+str(step))
+       # log_str.append("\nImage "+str(step))
         x = x.to(device)
         y = y.to(device)
 
@@ -223,21 +227,36 @@ def save_attacked_img(model, device, args):
                 cnt += 1
             else:
                 continue
-            img = transform((x.squeeze()).cpu())
-            print("original:", y.item()==o.item())
-            log_str.append("original: "+str(y.item()==o.item()))
-            img.save(save_path+str(step)+"_original_"+str(y.item())+".jpg")
             
-        advX, logs, c = at.perturb(x, y, log=True, advFR=False) 
-        log_str += logs
+            
+        advX, c = at.perturb(x, y, log=True, advFR=False) 
+        # with torch.no_grad():
+        #     attack_logit = model(advX)
 
-        img = transform(advX.squeeze().cpu())
-        img.save(save_path+str(step)+"_attacked_"+str(c)+".jpg")
+        # print(f"origin_logit : {logit}")
+        # print(f"attack_logit : {attack_logit}")
+        #log_str += logs
 
-    f = open(save_path+"log.txt", 'w')
-    for st in log_str:
-        f.write(st+"\n")
-    f.close()
+        if c == y.item():
+            continue
+
+        #img = transform((x.squeeze()).cpu())
+        print("original:", y.item()==o.item())
+        #log_str.append("original: "+str(y.item()==o.item()))
+       # img.save(save_path+str(step)+"_original_"+str(y.item())+".jpg")
+        with open(save_path+str(step)+"_original_"+str(y.item())+".pickle", 'wb') as f:
+            pickle.dump(x.squeeze(), f, pickle.HIGHEST_PROTOCOL)
+        with open(save_path+str(step)+"_attacked_"+str(c)+".pickle", 'wb') as f:
+            pickle.dump(advX.squeeze(), f, pickle.HIGHEST_PROTOCOL)
+        
+
+       # img = transform(advX.squeeze().cpu())
+        #img.save(save_path+str(step)+"_attacked_"+str(c)+".jpg")
+
+    # f = open(save_path+"log.txt", 'w')
+    # for st in log_str:
+    #     f.write(st+"\n")
+    # f.close()
 
 def attacks_energy_img(model, device, args):
     # energy = 기존 이미지와의 MSE
@@ -365,10 +384,74 @@ def setModel(str, n_way, imgsz, imgc):
         num_ftrs = model.classifier._modules["1"].in_features
         model.classifier._modules["1"] = torch.nn.Linear(num_ftrs, n_way)
         model.features._modules["0"]._modules["0"] = torch.nn.Conv2d(imgc, 32, kernel_size=3, stride=2, padding=1, bias=False)
-        return models.mobilenet_v2(weights='IMAGENET1K_V1')
+        return model
     elif str=="conv3":
         pass
     else:
         print("wrong model")
         print("possible models : resnet18, resnet34, resnet50, resnet101, resnet152, alexnet, densenet121, mobilenet_v2, conv3")
         exit()
+
+def open_image(model, device, args):
+        # save attacked image
+    at = setAttack(args.test_attack, model, args.test_eps, args)
+
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
+    #transform = transforms.ToPILImage()
+    db_test = DataLoader(test_data, 1, shuffle=False, num_workers=0, pin_memory=True) # 하나만 가져오기
+    if args.imgc==1:
+        color="gray"
+    else:
+        color="RGB"
+    save_path = ".\\AttackedImages\\"+color+"\\"+args.test_attack+"\\"+"eps_"+str(args.test_eps)+"\\"
+    os.makedirs(save_path, exist_ok=True)
+    
+    #log_str = []
+    cnt = 0
+    
+    for step, (x, y) in enumerate(db_test):
+        print()
+        print("Image", step)
+       # log_str.append("\nImage "+str(step))
+        x = x.to(device)
+        y = y.to(device)
+
+        with torch.no_grad():
+            logit = model(x)
+            p = torch.nn.functional.softmax(logit, dim=1)
+            o = torch.argmax(p, dim=1)
+            if(y.item()==o.item()):
+                cnt += 1
+            else:
+                continue
+            
+            
+        advX, c = at.perturb(x, y, log=True, advFR=False) 
+        # with torch.no_grad():
+        #     attack_logit = model(advX)
+
+        # print(f"origin_logit : {logit}")
+        # print(f"attack_logit : {attack_logit}")
+        #log_str += logs
+
+        if c == y.item():
+            continue
+
+        #img = transform((x.squeeze()).cpu())
+        print("original:", y.item()==o.item())
+        #log_str.append("original: "+str(y.item()==o.item()))
+       # img.save(save_path+str(step)+"_original_"+str(y.item())+".jpg")
+        with open(save_path+str(step)+"_original_"+str(y.item())+".pickle", 'wb') as f:
+            pickle.dump(x.squeeze(), f, pickle.HIGHEST_PROTOCOL)
+        with open(save_path+str(step)+"_attacked_"+str(c)+".pickle", 'wb') as f:
+            pickle.dump(advX.squeeze(), f, pickle.HIGHEST_PROTOCOL)
+        
+        break
+
+    with open(save_path+str(step)+"_original_"+str(y.item())+".pickle", 'rb') as f:
+        saved_x = pickle.load(f)
+    with open(save_path+str(step)+"_attacked_"+str(c)+".pickle", 'rb') as f:
+        saved_advx = pickle.load(f)
+
+    print(torch.sum(torch.abs(advX-saved_advx)))
+    print(torch.sum(torch.abs(x-saved_x)))
