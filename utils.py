@@ -195,7 +195,7 @@ def save_all_attacked_img(model, device, args):
             else:
                 break
 
-def save_attacked_img(model, device, args):
+def save_attacked_tensor(model, device, args):
     # save attacked image
     at = setAttack(args.test_attack, model, args.test_eps, args)
 
@@ -205,7 +205,7 @@ def save_attacked_img(model, device, args):
         color="gray"
     else:
         color="RGB"
-    save_path = ".\\AttackedImages\\"+color+"\\"+args.test_attack+"\\"+"eps_"+str(args.test_eps)+"\\"
+    save_path = ".\\AttackedImages\\pickle\\"+args.test_attack+"\\"+"eps_"+str(args.test_eps)+"\\"
     os.makedirs(save_path, exist_ok=True)
 
     cnt = 0
@@ -230,7 +230,7 @@ def save_attacked_img(model, device, args):
         with torch.no_grad():
             logit = model(advX)
             p = torch.nn.functional.softmax(logit, dim=1)
-            c = torch.argmax(p, dim=1)
+            c = torch.argmax(p, dim=1).item()
 
         if c == y.item():
             continue
@@ -241,6 +241,49 @@ def save_attacked_img(model, device, args):
         with open(save_path+str(step)+"_attacked_"+str(c)+".pickle", 'wb') as f:
             pickle.dump(advX.squeeze(), f, pickle.HIGHEST_PROTOCOL)
 
+def save_attacked_img(model, device, args):
+    # save attacked image
+    t = "jpg" # or "png"
+    at = setAttack(args.test_attack, model, args.test_eps, args)
+    transform = transforms.ToPILImage()
+
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
+    db_test = DataLoader(test_data, 1, shuffle=False, num_workers=0, pin_memory=True) # 하나만 가져오기
+    save_path = ".\\AttackedImages\\"+t+"\\"+args.test_attack+"\\"+"eps_"+str(args.test_eps)+"\\"
+    os.makedirs(save_path, exist_ok=True)
+
+    cnt = 0
+    
+    for step, (x, y) in enumerate(db_test):
+        print()
+        print("Image", step)
+
+        x = x.to(device)
+        y = y.to(device)
+
+        with torch.no_grad():
+            logit = model(x)
+            p = torch.nn.functional.softmax(logit, dim=1)
+            o = torch.argmax(p, dim=1)
+            if(y.item()==o.item()):
+                cnt += 1
+            else:
+                continue
+            
+        advX = at.perturb(x, y)
+        with torch.no_grad():
+            logit = model(advX)
+            p = torch.nn.functional.softmax(logit, dim=1)
+            c = torch.argmax(p, dim=1).item()
+
+        if c == y.item():
+            continue
+
+        print("original:", y.item()==o.item())
+        img = transform(x.squeeze().cpu())
+        img.save(f"{save_path}{step}_original_{y.item()}.{t}")
+        adv_img = transform(advX.squeeze().cpu())
+        adv_img.save(f"{save_path}{step}_attacked_{c}.{t}")
 
 def attacks_energy_img(model, device, args):
     # energy = 기존 이미지와의 MSE
@@ -374,7 +417,7 @@ def setModel(str, n_way, imgsz, imgc):
         print("possible models : resnet18, resnet34, resnet50, resnet101, resnet152, alexnet, densenet121, mobilenet_v2")
         exit()
 
-def open_image(model, device, args):
+def open_tensor(model, device, args):
         # save attacked image
     at = setAttack(args.test_attack, model, args.test_eps, args)
 
@@ -429,3 +472,69 @@ def open_image(model, device, args):
 
     # print(torch.sum(torch.abs(advX-saved_advx)))
     # print(torch.sum(torch.abs(x-saved_x)))
+
+def open_img(model, device, args):
+    transform = transforms.Compose([
+        transforms.Resize((args.imgsz, args.imgsz)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0, 0, 0,), std=(1, 1, 1))
+    ])
+    at = setAttack(args.test_attack, model, args.test_eps, args)
+
+    t = "bmp" # or "png"
+
+    test_data = Imagenet('../../dataset', mode='test', n_way=args.n_way, resize=args.imgsz, color=args.imgc)
+    db_test = DataLoader(test_data, 1, shuffle=False, num_workers=0, pin_memory=True) # 하나만 가져오기
+    if args.imgc==1:
+        color="gray"
+    else:
+        color="RGB"
+    save_path = ".\\AttackedImages\\temp\\"
+    os.makedirs(save_path, exist_ok=True)
+    
+    #log_str = []
+    cnt = 0
+    
+    for step, (x, y) in enumerate(db_test):
+        print()
+        print("Image", step)
+        x = x.to(device)
+        y = y.to(device)
+
+        with torch.no_grad():
+            logit = model(x)
+            p = torch.nn.functional.softmax(logit, dim=1)
+            o = torch.argmax(p, dim=1)
+            if(y.item()==o.item()):
+                cnt += 1
+            else:
+                continue
+            
+        advX = at.perturb(x, y)
+        with torch.no_grad():
+            logit = model(advX)
+            p = torch.nn.functional.softmax(logit, dim=1)
+            c = torch.argmax(p, dim=1).item()
+
+        if c == y.item():
+            continue
+
+        print("original:", y.item()==o.item())
+
+        img = transforms.ToPILImage()(x.squeeze().cpu())
+        img.save(f"{save_path}{step}_original_{y.item()}.{t}")
+
+        adv_img = transforms.ToPILImage()(advX.squeeze().cpu())
+        adv_img.save(f"{save_path}{step}_attacked_{c}.{t}")
+
+        break
+
+    saved_x = Image.open(f"{save_path}{step}_original_{y.item()}.{t}")
+    saved_x = transform(saved_x).to(device).unsqueeze(0)
+
+    saved_advx = Image.open(f"{save_path}{step}_attacked_{c}.{t}")
+    saved_advx = transform(saved_advx).to(device).unsqueeze(0)
+
+
+    print(torch.sum(torch.abs(advX-saved_advx)))
+    print(torch.sum(torch.abs(x-saved_x)))
